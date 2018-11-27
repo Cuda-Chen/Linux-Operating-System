@@ -334,4 +334,85 @@ available in the **numbers** array in **struct pid**.
 	* 0 for the global PID
 	* **pid->level** for the local one
 
+## Return Value of the System Call getpid( ) 
+* The **getpid( )** system call returns the
+value of **TGID** relative to the current process
+instead of the value of **PID**, so all the threads
+of a multithreaded application share the same
+identifier.
+* Most processes belong to a __thread group consisting of a single member__
+; as thread group leaders, they have the **TGID** equal to
+the **PID**, thus the **getpid( )** system call
+works as usual for this kind of process.
+
+## pid_hash Hash Table
+* Hash table **pid_hash** is used to find the
+**pid** instance that belongs to a __numeric
+**PID** value__ in __a given namespace__.
+
+## Size of pid_hash
+* **pid_hash** is used as an array of
+**hlist_head**.
+* The number of elements is determined by the RAM configuration of the machine and lies between 2^4 = 16 and 2^12 = 4,096.
+
+## pidhash_init
+* **pidhash_init** computes the apt size
+and allocates the required storage.
+
+## Multiple PIDs of a Process
+* When a new process is created, it may be
+visible in multiple namespaces.
+* For each of them a local **PID** must be generated.
+* This is handled in **alloc_pid**
+
+## Set the values of field numbers[] of struct pid
+* Starting at the level of the namespace in
+which the process is created, the kernel
+goes down to the *initial, global namespace*
+and creates a local PID for each.
+* All **upid** that are contained in **struct pid**
+are filled with the newly generated **PID**s.
+
+## Obtain the pid Instance from a numbers[] Field
+
+## Relationships among Processes
+* Processes created by a program have a
+***parent/child relationship***.
+* When a process creates multiple children, these
+children have ***sibling relationships***.
+* Several fields must be introduced in a process
+descriptor to represent these relationships with
+respect to a given process **P**. 
+* Processes **0** and **1** are created by the kernel.
+* Process **1** (**init**) is the ancestor of all other processes.
+
+## Fields of a Process Descriptor Used to Express Parenthood Relationships
+* **readl_parent**
+	* points to the process descriptor of the process that created **P**
+	* points to the descriptor of ***process 1*** (**init**) if
+the parent process no longer exists. 
+* **parent**
+	* Points to the current parent of **P**
+	* It may occasionally differ, such as when
+another process issues a **ptrace( )** system
+call requesting that it be allowed to monitor **P**.
+* **struct list_head children**
+	* The head of __the list containing all children__ created by **P**.
+	* This list is formed through the **sibling** field of the child processes.
+* **struct list_head sibling**
+	* The pointers to the next and previous elements in
+__the list of the sibling processes__, those that have the same parent as **P**.
+
+## Family Relationships between Processes
+
+## Other Relationship between Processes
+* There exist other relationships among processes: 
+	* a process can be a leader of a ***process group***
+or of a ***login session***
+	* it can be a leader of a ***thread group***
+	* it can also trace the execution of other processes
+
+## Other Process Relationship Fields of a Process Descriptor P
+* **struct task_struct * group_leader**
+	* Process descriptor pointer of the ***thread group leader*** of **P**.
 
