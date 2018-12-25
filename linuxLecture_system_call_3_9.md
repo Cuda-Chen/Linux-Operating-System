@@ -309,4 +309,205 @@ jmp *(%eax)
 ```
 
 ## Linux Macro (2)
-* 
+* Linux has named arguments for macros and uses backslash to refer the named argument, like \reg or \foo.
+```asm
+.macro PUSHRSP reg 
+  lea -4(%ebp),%ebp // push reg on to return stack 
+  movl \reg,(%ebp) 
+.endm
+```
+
+## Linux Macro (3)
+* **.macro reserve_str p1=0 p2**
+
+## Macro pushl_cfi
+```asm
+.macro pushl_cfi reg
+pushl \reg
+CFI_ADJUST_CFA_OFFSET 4
+.endm
+```
+
+## Code to Save Registers
+```asm
+# system call handler stub
+ENTRY(system_call)
+  RING0_INT_FRAME     # can't unwind into user space anyway
+  ASM_CLAC
+  pushl_cfi %eax      # save orig_eax
+  SAVE_ALL
+  GET_THREAD_INFO(%ebp)
+```
+* The function then stores the address of the **thread_info** data structure of the **current** process in **ebp**
+	* This is done by taking the value of the kernel stack pointer and rounding it up to a multiple of 8 KB.
+
+## SAVE_ALL and struct pt_regs
+```asm
+.macro SAVE_ALL 
+ cld 
+ PUSH_GS 
+ pushl_cfi %fs 
+ pushl_cfi %es 
+ pushl_cfi %ds 
+
+     :
+     :
+ pushl_cfi %ebx 
+ CFI_REL_OFFSET ebx, 0 
+ movl $(__USER_DS), %edx //to improve performance
+ movl %edx, %ds 
+ movl %edx, %es 
+ movl $(__KERNEL_PERCPU), %edx 
+ movl %edx, %fs 
+ SET_KERNEL_GS %edx 
+.endm 
+```
+
+## Call Frame Information Directives
+* CFI directives are GNU assembler AS directives.
+* “The CFI directives are used for debugging. It allows the debugger to unwind a stack.”
+* “On some architectures, exception handling must be managed with Call Frame Information directives.”
+
+## __KERNEL_PERCPU
+```asm
+#define GDT_ENTRY_KERNEL_BASE		(12)
+
+#define GDT_ENTRY_PERCPU    (GDT_ENTRY_KERNEL_BASE+15)
+
+#define __KERNEL_PERCPU (GDT_ENTRY_PERCPU * 8)
+```
+* GDT_ENTRY_PERCPU = 27
+
+## GDT
+
+## RING0_INT_FRAME (1)
+```asm
+.macro RING0_INT_FRAME
+   CFI_STARTPROC simple
+   CFI_SIGNAL_FRAME
+   CFI_DEF_CFA esp, 3*4
+   /*CFI_OFFSET cs, -2*4;*/
+   CFI_OFFSET eip, -3*4
+.endm
+```
+
+## RING0_INT_FRAME (2)
+* Empty: hence, all CFI_xxx Macros can be ignored.
+
+## Graphic Explanation of the Register-Saving Processing
+
+## Check Trace-related Flags
+* Next, the **system_call( )** function checks whether some
+specific flags, such as **_TIF_SYSCALL_TRACE** and
+**_TIF_SYSCALL_AUDIT** flags, included in the **flags** field
+of the **thread_info** structure is set that is, whether the
+***system call invocations*** of the executed program are being traced by a debugger.
+	* If this is the case, **system_call( )** invokes functions 
+**syscall_trace_entry( )** and **syscall_trace_leave()**
+
+## TI_flags(%ebp)
+```c
+#define offsetof(TYPE, MEMBER) \
+((size_t) &((TYPE *)0)->MEMBER)
+```
+```c
+#define OFFSET(sym, str, mem) \
+ DEFINE(sym, offsetof(struct str, mem))
+```
+```
+OFFSET(TI_flags, thread_info, flags);
+```
+```c
+#define   TI_flags    offsetof(struct thread_info, flags)
+```
+
+## Validity Check
+* A validity check is then performed on the **system call number** passed by the User Mode process. 
+* If it is greater than or equal to the number of entries in the **system call dispatch table**, the **system call handler** terminates:
+```asm
+   cmpl $(NR_syscalls), %eax
+   jae syscall_badsys
+          :
+syscall_badsys:
+   movl $-ENOSYS,PT_EAX(%esp)
+   jmp resume_userspace
+```
+* If the system call number is not valid, the function stores the
+ **-ENOSYS** value in the stack location where the **eax** register has been saved that is, at offset 24 from the current stack top.
+* It then jumps to **resume_userspace** (see below). In this way, when
+the process resumes its execution in User Mode, it will find a
+negative return code in **eax**.
+
+## Return Code of Invalid System Call -ENOSYS
+
+## Invoke a System Call Service Routine
+* Finally, the specific service routine associated with the system call number contained in eax is invoked:
+```asm
+call *sys_call_table(,%eax,4)
+```
+* Because each entry in the dispatch table is 4 bytes long,
+the kernel finds the address of the service routine to be
+invoked by multiplying the **system call number** by 4,
+adding the initial address of the **sys_call_table** dispatch
+table, and extracting a pointer to the service routine from
+that slot in the table.
+
+## Exiting from a System Call
+* When the **system call service routine**
+terminates, the **system_call( )** function gets
+its return code from **eax** and stores it in the stack
+location where the User Mode value of the **eax**
+register is saved:
+```asm
+movl %eax, 24(%esp)
+```
+* Thus, the User Mode process will find the return
+code of the system call in the **eax** register.
+
+## Prepare the Return Code of the System Call
+
+## Check Flags
+* Then, the **system_call( )** function disables
+the local interrupts and checks the **flags** in the
+**thread_info** structure of **current**:
+```c
+#define DISABLE_INTERRUPTS(x)   cli
+
+#define _TIF_ALLWORK_MASK \
+ (_TIF_SIGPENDING|_TIF_NEED_RESCHED|_TIF_SINGLESTEP|\
+  _TIF_ASYNC_TLB|_TIF_NOTIFY_RESUME)
+```
+```asm
+DISABLE_INTERRUPTS(CLBR_ANY) TRACE_IRQS_OFF
+movl TI_flags(%ebp), %ecx
+testl $_TIF_ALLWORK_MASK, %ecx  # current->work
+jne syscall_exit_work
+
+restore_all:
+```
+
+## Return to User Mode
+* The **flags** field is at offset 8 in the **thread_info** structure. 
+* The mask **_TIF_ALLWORK_MASK** selects specific flags. 
+	* If none of these flags is set, the function executes the instruction at label **restore_all**: this code
+
+## Handle Works Indicated by the Flags
+* If any of the flags is set, then there is some work to be done before returning to User Mode.
+* code at the **resume_userspace** and **work_pending** labels checks for
+	* **rescheduling requests**
+	* virtual-8086 mode
+	* **pending signals**
+	* single stepping
+	* then eventually a jump is done to the **restore_all** label to resume the execution of the User Mode process
+
+## Go into Kernel 
+* When the **sysenter** instruction is executed, the CPU control unit:
+	* Copies the content of **SYSENTER_CS_MSR** into **cs**.
+	* Copies the content of **SYSENTER_EIP_MSR** into **eip**.
+	* Copies the content of **SYSENTER_ESP_MSR** into **esp**.
+	* Adds 8 to the value of **SYSENTER_CS_MSR**, and
+loads this value into **ss**.
+* Therefore, the CPU switches to Kernel Mode and
+starts executing the first instruction of the ***kernel entry point***.
+
+## 
